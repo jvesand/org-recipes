@@ -240,11 +240,7 @@
     nil
     (mapcar (lambda (f)
               (org-recipes--collect-snippets f recipe))
-            (append (directory-files-recursively org-recipes-directory "")
-                    (when (featurep 'org-wiki)
-                      (mapcar (lambda (f)
-                                (concat org-wiki-location "/" f))
-                              (org-wiki--page-files))))))))
+            (directory-files-recursively org-recipes-directory "")))))
 
 (defun org-recipes--collect-snippets (f &optional recipe)
   (let* ((org-buf (find-file-noselect f))
