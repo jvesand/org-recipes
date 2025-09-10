@@ -90,7 +90,8 @@
                                  :prompt "Recipe: "
                                  :category 'org-recipe
                                  :history 'org-recipes-history
-                                 :lookup #'consult--lookup-cdr)))
+                                 :lookup #'consult--lookup-cdr
+                                 :keymap org-recipes-minibuffer-map)))
     (when selected
       (org-recipes--persistent-view selected))))
 
@@ -102,6 +103,17 @@
     map))
 
 (add-to-list 'embark-keymap-alist '(org-recipe . org-recipes-embark-map))
+
+(defvar org-recipes-minibuffer-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "s-c") (lambda ()
+                                  (interactive)
+                                  (let ((candidate (vertico--candidate)))
+                                    (when candidate
+                                      (org-recipes--copy (get-text-property 0 'org-recipes-data candidate))
+                                      (exit-minibuffer)))))
+    map))
+
 
 (defun org-recipes--persistent-view (c)
   (let ((data (if (listp c) c (get-text-property 0 'org-recipes-data c))))
