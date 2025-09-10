@@ -81,7 +81,10 @@
   (interactive)
   (let* ((candidates (org-recipes--get-candidates))
          (annotated-candidates (mapcar (lambda (c)
-                                        (cons (car c) (cdr c)))
+                                        (let ((display (car c))
+                                              (data (cdr c)))
+                                          (put-text-property 0 1 'org-recipes-data data display)
+                                          (cons display data)))
                                       candidates))
          (selected (consult--read annotated-candidates
                                  :prompt "Recipe: "
@@ -101,9 +104,10 @@
 (add-to-list 'embark-keymap-alist '(org-recipe . org-recipes-embark-map))
 
 (defun org-recipes--persistent-view (c)
-  (find-file (org-recipes--get-file c))
-  (goto-line (org-recipes--get-line c))
-  (org-show-subtree))
+  (let ((data (if (listp c) c (get-text-property 0 'org-recipes-data c))))
+    (find-file (org-recipes--get-file data))
+    (goto-line (org-recipes--get-line data))
+    (org-show-subtree)))
 
 (defun org-recipes-insert-current ()
   "Insert recipe at point using consult selection."
@@ -136,21 +140,23 @@
       (org-recipes--copy selected))))
 
 (defun org-recipes--insert (c)
-  (maphash (lambda (file src-str)
-             (let ((file-empty (string-equal file "empty")))
-               (with-current-buffer (if file-empty
-                                        (current-buffer)
-                                      (find-file-noselect file))
-                 (save-excursion
-                   (beginning-of-line)
-                   (let ((start (point)))
-                     (insert src-str)
-                     (indent-region start (point))
-                     (unless file-empty (save-buffer)))))))
-           (org-recipes--distribute-src-blocks-strings (org-recipes--get-src-blocks c))))
+  (let ((data (if (listp c) c (get-text-property 0 'org-recipes-data c))))
+    (maphash (lambda (file src-str)
+               (let ((file-empty (string-equal file "empty")))
+                 (with-current-buffer (if file-empty
+                                          (current-buffer)
+                                        (find-file-noselect file))
+                   (save-excursion
+                     (beginning-of-line)
+                     (let ((start (point)))
+                       (insert src-str)
+                       (indent-region start (point))
+                       (unless file-empty (save-buffer)))))))
+             (org-recipes--distribute-src-blocks-strings (org-recipes--get-src-blocks data)))))
 
 (defun org-recipes--copy (c)
-  (let* ((src-blocks (org-recipes--get-src-blocks c))
+  (let* ((data (if (listp c) c (get-text-property 0 'org-recipes-data c)))
+         (src-blocks (org-recipes--get-src-blocks data))
          (dist-table (org-recipes--distribute-src-blocks-strings src-blocks)))
     (maphash (lambda (file src-str)
                (let ((file-empty (string-equal file "empty")))
