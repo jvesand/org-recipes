@@ -107,7 +107,10 @@
   (let ((data (if (listp c) c (get-text-property 0 'org-recipes-data c))))
     (find-file (org-recipes--get-file data))
     (goto-line (org-recipes--get-line data))
-    (org-show-subtree)))
+    (org-show-subtree)
+    (org-fold-reveal)
+    ;; (recenter)
+    (recenter-top-bottom 0)))
 
 (defun org-recipes-insert-current ()
   "Insert recipe at point using consult selection."
