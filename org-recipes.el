@@ -1,13 +1,13 @@
-;;; org-recipes.el --- A code snippet manager with Org and Helm
+;;; org-recipes.el --- A code snippet manager with Org and Consult/Vertico
 ;;
 ;; Filename: org-recipes.el
-;; Description: A code snippet manager with Org and Helm
+;; Description: A code snippet manager with Org and Consult/Vertico
 ;; Author: Tu, Do Hoang <tuhdo1710@gmail.com>
 ;; URL      : https://github.com/tuhdo/semantic-refactor
-;; Maintainer: Tu, Do Hoang
+;; Maintainer: Johan Sandberg
 ;; Created: March 11, 2017
-;; Version: 0.1
-;; Package-Requires: ((emacs "24.4") helm org)
+;; Version: 0.3
+;; Package-Requires: ((emacs "24.4") consult embark org)
 ;; Keywords: tools
 ;; Compatibility: GNU Emacs: 24.4+
 ;;
@@ -22,7 +22,9 @@
 ;;
 ;; - Insert a code snippet into the current buffer. The description text is
 ;; stripped and all code snippets are concantenated into a single snippet and
-;; then it is insert into current buffer.
+;; then it is nisert into current buffer.
+;;
+;; Updated to use Consult and Embark instead of Helm.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -44,15 +46,17 @@
 ;;; Code:
 (require 'subr-x)
 (require 'thingatpt)
-;; (defvar org-recipes-cache nil)
+(require 'consult)
+(require 'embark)
+(require 'cl-lib)
 
 (defcustom org-recipes-directory "~/org-recipes"
   "Source directory that org-recipes will search for code snippets in every Org files."
   :type 'list
   :group 'org-recipes)
-;; (defun org-recipes-invalidate-cache ()
-;;   (interactive)
-;;   (setq org-recipes-cache nil))
+
+(defvar org-recipes-history nil
+  "History for org-recipes completion.")
 
 (defmacro org-recipes--get-heading-face (headline)
   `(intern-soft (concat "org-level-" (number-to-string (org-element-property :level ,headline)))))
@@ -73,38 +77,63 @@
   `(org-element-property :value ,src-block))
 
 (defun org-recipes ()
-  "docstring"
+  "Select and act on org recipe snippets using consult."
   (interactive)
-  (helm :sources (org-recipes--build-source)
-        :buffer "*helm sync source*"))
+  (let* ((candidates (org-recipes--get-candidates))
+         (annotated-candidates (mapcar (lambda (c)
+                                        (cons (car c) (cdr c)))
+                                      candidates))
+         (selected (consult--read annotated-candidates
+                                 :prompt "Recipe: "
+                                 :category 'org-recipe
+                                 :history 'org-recipes-history
+                                 :lookup #'consult--lookup-cdr)))
+    (when selected
+      (org-recipes--persistent-view selected))))
 
-(defun org-recipes--build-source ()
-  "docstring"
-  (interactive "P")
-  (helm-build-sync-source "Org Snippets"
-    :candidates (org-recipes--get-candidates)
-    :action '(("Jump to snippet" . org-recipes--persistent-view)
-              ("Insert code" . org-recipes--insert))
-    :keymap org-recipes-map
-    :persistent-action 'org-recipes--persistent-view))
+(defvar org-recipes-embark-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "i") #'org-recipes--insert)
+    (define-key map (kbd "c") #'org-recipes--copy)
+    (define-key map (kbd "v") #'org-recipes--persistent-view)
+    map))
 
-(setq org-recipes-map
-      (let ((map (make-sparse-keymap)))
-        (set-keymap-parent map helm-map)
-        (define-key map (kbd "C-c C-i") 'org-recipes-insert)
-        (define-key map (kbd "C-c i") 'org-recipes-insert)
-        (delq nil map)
-        map))
+(add-to-list 'embark-keymap-alist '(org-recipe . org-recipes-embark-map))
 
 (defun org-recipes--persistent-view (c)
   (find-file (org-recipes--get-file c))
   (goto-line (org-recipes--get-line c))
   (org-show-subtree))
 
-(defun org-recipes-insert ()
+(defun org-recipes-insert-current ()
+  "Insert recipe at point using consult selection."
   (interactive)
-  (with-helm-alive-p
-    (helm-exit-and-execute-action 'org-recipes--insert)))
+  (let* ((candidates (org-recipes--get-candidates))
+         (annotated-candidates (mapcar (lambda (c)
+                                        (cons (car c) (cdr c)))
+                                      candidates))
+         (selected (consult--read annotated-candidates
+                                 :prompt "Insert recipe: "
+                                 :category 'org-recipe
+                                 :history 'org-recipes-history
+                                 :lookup #'consult--lookup-cdr)))
+    (when selected
+      (org-recipes--insert selected))))
+
+(defun org-recipes-copy-current ()
+  "Copy recipe using consult selection."
+  (interactive)
+  (let* ((candidates (org-recipes--get-candidates))
+         (annotated-candidates (mapcar (lambda (c)
+                                        (cons (car c) (cdr c)))
+                                      candidates))
+         (selected (consult--read annotated-candidates
+                                 :prompt "Copy recipe: "
+                                 :category 'org-recipe
+                                 :history 'org-recipes-history
+                                 :lookup #'consult--lookup-cdr)))
+    (when selected
+      (org-recipes--copy selected))))
 
 (defun org-recipes--insert (c)
   (maphash (lambda (file src-str)
@@ -119,6 +148,19 @@
                      (indent-region start (point))
                      (unless file-empty (save-buffer)))))))
            (org-recipes--distribute-src-blocks-strings (org-recipes--get-src-blocks c))))
+
+(defun org-recipes--copy (c)
+  (let* ((src-blocks (org-recipes--get-src-blocks c))
+         (dist-table (org-recipes--distribute-src-blocks-strings src-blocks)))
+    (maphash (lambda (file src-str)
+               (let ((file-empty (string-equal file "empty")))
+                 (ignore-errors
+                   (with-current-buffer (if file-empty
+                                            (current-buffer)
+                                          (find-file-noselect file))
+                     (kill-new src-str)
+                     (unless file-empty (save-buffer))))))
+             dist-table)))
 
 (defmacro org-recipes--src-data-get-file (s)
   `(car ,s))
@@ -182,8 +224,8 @@
     (list (or file "empty") ignore pre-recipe-list post-recipe-list src-string)))
 
 (defun org-recipes--filter-src-parameters (src-params key-list)
-  (delete-if (lambda (s)
-               (not (member (car s) key-list))) src-params))
+  (cl-remove-if (lambda (s)
+                  (not (member (car s) key-list))) src-params))
 
 (defun org-recipes--get-candidates (&optional recipe)
   (-flatten-n
@@ -226,13 +268,12 @@
                            (eq (length src-blocks-parent) 1)
                            (or (null recipe)
                                (equal symbol (symbol-name recipe))))
-                  (cons (concat (concat (file-relative-name f org-recipes-directory) ":")
+                  (cons (concat
                                 (concat (number-to-string linum) ":")
                                 " "
                                 (when symbol (propertize (concat  "[" symbol "]  ") 'face 'font-lock-type-face))
                                 (org-recipes--get-parent-string headline)
-                                ;; (format "%s" (org-element-property :title headline))
-                                (propertize (format "%s" (org-element-property :title headline)) 'face (org-recipes--get-heading-face headline)))
+                                (propertize (org-element-interpret-data (org-element-property :title headline)) 'face (org-recipes--get-heading-face headline)))
                         (list f
                               linum
                               src-blocks)))))
